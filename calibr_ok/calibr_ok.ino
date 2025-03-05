@@ -1,6 +1,8 @@
 #include <Wire.h>
 #include <Adafruit_ICM20948.h>
 #include "MadgwickAHRS.h"
+#include <math.h>
+
 
 // Déclaration des IMUs
 Adafruit_ICM20948 icm1, icm2;
@@ -16,10 +18,25 @@ float mag_offset2[3], mag_scale2[3];
 float gyro_offset1[3] = {0, 0, 0};
 float gyro_offset2[3] = {0, 0, 0};
 
+//Def quaternions
+float q1[4];
+float q2[4];
+float q1Inv[4];
+float qr[4];
+
+//Def angles
+float roll;
+float pitch;
+float yaw;
+float roll1;
+float pitch1;
+float yaw1;
+float roll2;
+float pitch2;
+float yaw2;
+
 unsigned long previousMillis = 0;  // Variable pour stocker le temps précédent
 const long interval = 2000;  // Intervalle de 1000 millisecondes (1 seconde)
-
-
 
 void setup() {
   Serial.begin(115200);
@@ -35,6 +52,8 @@ void setup() {
     Serial.println("IMU 2 non détecté !");
     while (1) delay(10);
   }
+  
+  Serial.println("Les deux IMUs sont détectés !");
 
   //calibration des gyroscope
   calibrateGyro();
@@ -42,7 +61,7 @@ void setup() {
   // Calibration des magnétomètres
   calibrateMagnetometer();
 
-  Serial.println("Les deux IMUs sont détectés !");
+  //Init filtre Madgwick
   filter1.begin(100.0f); // 100 Hz
   filter2.begin(100.0f);
 }
@@ -53,6 +72,7 @@ void loop() {
 
   icm1.getEvent(&accel1, &gyro1, &temp1, &mag1);
   icm2.getEvent(&accel2, &gyro2, &temp2, &mag2);
+
 
   // Convertir les valeurs d'accélération de m/s² à g
   accel1.acceleration.x = accel1.acceleration.x / 9.81;
@@ -70,7 +90,6 @@ void loop() {
   mag2.magnetic.y = (mag2.magnetic.y - mag_offset2[1]) / mag_scale2[1];
   mag2.magnetic.z = (mag2.magnetic.z - mag_offset2[2]) / mag_scale2[2];
 
-
   //Correction gyroscope
   gyro1.gyro.x -= gyro_offset1[0];
   gyro1.gyro.y -= gyro_offset1[1];
@@ -79,44 +98,105 @@ void loop() {
   gyro2.gyro.y -= gyro_offset2[1];
   gyro2.gyro.z -= gyro_offset2[2];
 
-
-  filter1.updateIMU(gyro1.gyro.x, gyro1.gyro.y, gyro1.gyro.z, accel1.acceleration.x, accel1.acceleration.y, accel1.acceleration.z);//, mag1.magnetic.x, mag1.magnetic.y, mag1.magnetic.z);
-  filter2.updateIMU(gyro2.gyro.x, gyro2.gyro.y, gyro2.gyro.z, accel2.acceleration.x, accel2.acceleration.y, accel2.acceleration.z);//, mag2.magnetic.x, mag2.magnetic.y, mag2.magnetic.z);
+  // Update val dans le filtre
+  filter1.update(gyro1.gyro.x, gyro1.gyro.y, gyro1.gyro.z, accel1.acceleration.x, accel1.acceleration.y, accel1.acceleration.z, mag1.magnetic.x, mag1.magnetic.y, mag1.magnetic.z);
+  filter2.update(gyro2.gyro.x, gyro2.gyro.y, gyro2.gyro.z, accel2.acceleration.x, accel2.acceleration.y, accel2.acceleration.z, mag2.magnetic.x, mag2.magnetic.y, mag2.magnetic.z);
   
+  //Récupération des quaternions (ajout dans le code de la librairie)
+  q1[0] = filter1.getQ0(); q1[1] = filter1.getQ1(); q1[2] = filter1.getQ2(); q1[3] = filter1.getQ3();
+  q2[0] = filter2.getQ0(); q2[1] = filter2.getQ1(); q2[2] = filter2.getQ2(); q2[3] = filter2.getQ3();
 
-  float q1[4] = { filter1.getQ0(), filter1.getQ1(), filter1.getQ2(), filter1.getQ3() };
-  float q2[4] = { filter2.getQ0(), filter2.getQ1(), filter2.getQ2(), filter2.getQ3() };
 
+  //Normalise si besoin
   normalizeQuaternion(q1);
   normalizeQuaternion(q2);
-  delay(10);
 
-  unsigned long currentMillis = millis();
-  if (currentMillis - previousMillis >= interval) {
-    // Sauvegarder le temps actuel pour le prochain affichage
-    previousMillis = currentMillis;
-    Serial.print("Q0:");
-    Serial.print(filter1.getQ0());
-    Serial.print("   Q1:");
-    Serial.print(filter1.getQ1());
-    Serial.print("   Q2:");
-    Serial.println(filter1.getQ2());
-    Serial.print("   Q3:");
-    Serial.println(filter1.getQ3());
-    Serial.println("------------------------------");
+quaternionToEulerDegree(q1,roll1,pitch1,yaw1);
+quaternionToEulerDegree(q2,roll2,pitch2,yaw2);
 
-    Serial.print("Q0:");
-    Serial.print(filter2.getQ0());
-    Serial.print("   Q1:");
-    Serial.print(filter2.getQ1());
-    Serial.print("   Q2:");
-    Serial.println(filter2.getQ2());
-    Serial.print("   Q3:");
-    Serial.println(filter2.getQ3());
+  //calcul quaternion relatif
+  quaternionInverse(q1, q1Inv);
+  multiplicationQuaternion(q2, q1Inv, qr);
+
+  //calcul angle relatif
+  quaternionToEulerDegree(qr,roll,pitch,yaw);
+
+unsigned long currentMillis = millis(); // Récupérer le temps actuel
+if (currentMillis - previousMillis >= interval) { // Vérifie si 2 secondes se sont écoulées
+    previousMillis = currentMillis; // Met à jour le dernier temps enregistré
+
+    // Affichage des résultats
     Serial.println("------------------------------");
-  }
+    Serial.print("q1: ");
+    for (int i = 0; i < 4; i++) {
+        Serial.print(q1[i]); Serial.print(" ");
+    }
+    Serial.println();
+    Serial.print("Roll: "); Serial.print(roll1); Serial.print("°, ");
+    Serial.print("Pitch: "); Serial.print(pitch1); Serial.print("°, ");
+    Serial.print("Yaw: "); Serial.print(yaw1); Serial.println("°");
+    Serial.print("q2: ");
+    for (int i = 0; i < 4; i++) {
+        Serial.print(q2[i]); Serial.print(" ");
+    }
+    Serial.println();
+    Serial.print("Roll: "); Serial.print(roll2); Serial.print("°, ");
+    Serial.print("Pitch: "); Serial.print(pitch2); Serial.print("°, ");
+    Serial.print("Yaw: "); Serial.print(yaw2); Serial.println("°");
+    Serial.print("q1Inv: ");
+    for (int i = 0; i < 4; i++) {
+        Serial.print(q1Inv[i]); Serial.print(" ");
+    }
+    Serial.println();
+    Serial.print("qr: ");
+    for (int i = 0; i < 4; i++) {
+        Serial.print(qr[i]); Serial.print(" ");
+    }
+    Serial.println("Angle globaux");
+    Serial.print("Roll: "); Serial.print(roll); Serial.print("°, ");
+    Serial.print("Pitch: "); Serial.print(pitch); Serial.print("°, ");
+    Serial.print("Yaw: "); Serial.print(yaw); Serial.println("°");
+    Serial.println();
 }
 
+}
+
+void quaternionToEulerDegree(float q[4], float &roll, float &pitch, float &yaw){
+  //calcul
+  roll = atan2(2.0*(q[0]*q[1] + q[2]*q[3]) , 1.0 - 2.0*(q[0]*q[0] + q[1]*q[1]));
+  pitch = asin(2.0 * (q[0] * q[2] - q[3] * q[1]));
+  yaw = atan2(2.0*(q[0]*q[3] + q[1]*q[2]) , 1.0 - 2.0*(q[2]*q[2] + q[3]*q[3]));
+
+  // Conversion en degrés
+  roll  *= 180.0 / M_PI;
+  pitch *= 180.0 / M_PI;
+  yaw   *= 180.0 / M_PI;
+}
+
+void multiplicationQuaternion(float q1[4], float q2[4], float qm[4]){
+  qm[0] = q1[0]*q2[0] - q1[1]*q2[1] - q1[2]*q2[2] - q1[3]*q2[3];
+  qm[1] = q1[0]*q2[1] + q1[1]*q2[0] + q1[2]*q2[3] - q1[3]*q2[2];
+  qm[2] = q1[0]*q2[2] - q1[1]*q2[3] + q1[2]*q2[0] + q1[3]*q2[1];
+  qm[3] = q1[0]*q2[3] + q1[1]*q2[2] - q1[2]*q2[1] + q1[3]*q2[0];
+}
+
+void quaternionInverse(float q[4], float qInv[4]) {
+  qInv[0] =  q[0];
+  qInv[1] = -q[1];
+  qInv[2] = -q[2];
+  qInv[3] = -q[3];
+}
+
+void normalizeQuaternion(float q[4]) {
+  float norm = sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
+  if (norm > 0.0f) {
+    q[0] /= norm;
+    q[1] /= norm;
+    q[2] /= norm;
+    q[3] /= norm;
+  }
+
+}
 
 void calibrateMagnetometer() {
   Serial.println("=== DÉBUT CALIBRATION DES MAGNÉTOMÈTRES ===");
@@ -182,18 +262,6 @@ void calibrateMagnetometer() {
     Serial.print("  Scale: ");
     Serial.println(mag_scale2[i]);
   }
-}
-
-
-void normalizeQuaternion(float q[4]) {
-  float norm = sqrt(q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]);
-  if (norm > 0.0f) {
-    q[0] /= norm;
-    q[1] /= norm;
-    q[2] /= norm;
-    q[3] /= norm;
-  }
-
 }
 
 void calibrateGyro() {
