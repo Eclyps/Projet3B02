@@ -3,7 +3,7 @@
 #include "Fusion.h"  // Bibliothèque Fusion
 
 Adafruit_ICM20948 icm1, icm2;  // Instance du capteur
-FusionAhrs ahrs1,ahrs2;        // Instance de l'algorithme Fusion
+FusionAhrs ahrs1, ahrs2;       // Instance de l'algorithme Fusion
 
 // Déclarer les évènement des capteurs
 sensors_event_t accel1, gyro1, temp1, mag1;
@@ -20,22 +20,30 @@ float filtMag1_x, filtMag1_y, filtMag1_z;
 float filtMag2_x, filtMag2_y, filtMag2_z;
 
 //Var pour calibration magnéto
-float mag_min1[3] = {1000, 1000, 1000}, mag_max1[3] = {-1000, -1000, -1000};
-float mag_min2[3] = {1000, 1000, 1000}, mag_max2[3] = {-1000, -1000, -1000};
+float mag_min1[3] = { 1000, 1000, 1000 }, mag_max1[3] = { -1000, -1000, -1000 };
+float mag_min2[3] = { 1000, 1000, 1000 }, mag_max2[3] = { -1000, -1000, -1000 };
 float mag_offset1[3], mag_scale1[3];
 float mag_offset2[3], mag_scale2[3];
 
 // calibration gyro
-float gyro_offset1[3] = {0, 0, 0};
-float gyro_offset2[3] = {0, 0, 0};
+float gyro_offset1[3] = { 0, 0, 0 };
+float gyro_offset2[3] = { 0, 0, 0 };
 
 // Covariances pour Kalman
-float P1_X = 1.0, P1_Y = 1.0, P1_Z = 1.0;  
-float P2_X = 1.0, P2_Y = 1.0, P2_Z = 1.0;  
+float P1_x = 1.0, P1_y = 1.0, P1_z = 1.0;
+float P2_x = 1.0, P2_y = 1.0, P2_z = 1.0;
+
+// gain Kalman
+float K1_x = 1.0, K1_y = 1.0, K1_z = 1.0;
+float K2_x = 1.0, K2_y = 1.0, K2_z = 1.0;
+
+// estimation Kalman
+float U1_x = 1.0, U1_y = 1.0, U1_z = 1.0;
+float U2_x = 1.0, U2_y = 1.0, U2_z = 1.0;
 
 // Var pour affichage toutes les 2sec
-unsigned long previousMillis = 0;  
-const long interval = 2000;  
+unsigned long previousMillis = 0;
+const long interval = 2000;
 
 //def quaternions
 float q1Inv[4];
@@ -54,19 +62,20 @@ float yaw2;
 
 void setup() {
   Serial.begin(115200);
-  while (!Serial); 
+  while (!Serial)
+    ;
 
   Serial.println("Initialisation des IMUs...");
 
-  if (!icm1.begin_I2C(0x69)) { 
+  if (!icm1.begin_I2C(0x69)) {
     Serial.println("IMU 1 non détecté !");
     while (1) delay(10);
   }
-  if (!icm2.begin_I2C(0x68)) { 
+  if (!icm2.begin_I2C(0x68)) {
     Serial.println("IMU 2 non détecté !");
     while (1) delay(10);
   }
-  
+
   Serial.println("Les deux IMUs sont détectés !");
 
   // Configurer les capteurs
@@ -109,48 +118,50 @@ void loop() {
 
 
   // filtrage kalman
-  kalman(mag1_x, &filtMag1_x, &P1_X, dt);
-  kalman(mag1_y, &filtMag1_y, &P1_Y, dt);
-  kalman(mag1_z, &filtMag1_z, &P1_Z, dt);
-  kalman(mag2_x, &filtMag2_x, &P2_X, dt);
-  kalman(mag2_y, &filtMag2_y, &P2_Y, dt);
-  kalman(mag2_z, &filtMag2_z, &P2_Z, dt);
+  filtMag1_x = Kalman(mag1_x, &P1_x, &K1_x, &U1_x);
+  filtMag1_y = Kalman(mag1_y, &P1_y, &K1_y, &U1_y);
+  filtMag1_z = Kalman(mag1_z, &P1_z, &K1_z, &U1_z);
+  filtMag2_x = Kalman(mag2_x, &P2_x, &K2_x, &U2_x);
+  filtMag2_y = Kalman(mag2_y, &P2_y, &K2_y, &U2_y);
+  filtMag2_z = Kalman(mag2_z, &P2_z, &K2_z, &U2_z);
 
 
   // Convertir les données pour Fusion
-  FusionVector gyroscope1 = { 
+  FusionVector gyroscope1 = {
     gyro1.gyro.x * 57.2958f,  // rad/s → °/s
-    gyro1.gyro.y * 57.2958f,  
-    gyro1.gyro.z * 57.2958f 
+    gyro1.gyro.y * 57.2958f,
+    gyro1.gyro.z * 57.2958f
   };
 
-  FusionVector gyroscope2 = { 
+  FusionVector gyroscope2 = {
     gyro2.gyro.x * 57.2958f,  // rad/s → °/s
-    gyro2.gyro.y * 57.2958f,  
-    gyro2.gyro.z * 57.2958f 
+    gyro2.gyro.y * 57.2958f,
+    gyro2.gyro.z * 57.2958f
   };
 
-  FusionVector accelerometer1 = { 
+  FusionVector accelerometer1 = {
     accel1.acceleration.x / 9.81f,  // m/s² → g
-    accel1.acceleration.y / 9.81f,  
-    accel1.acceleration.z / 9.81f 
+    accel1.acceleration.y / 9.81f,
+    accel1.acceleration.z / 9.81f
   };
 
-  FusionVector accelerometer2 = { 
+  FusionVector accelerometer2 = {
     accel2.acceleration.x / 9.81f,  // m/s² → g
-    accel2.acceleration.y / 9.81f,  
-    accel2.acceleration.z / 9.81f 
+    accel2.acceleration.y / 9.81f,
+    accel2.acceleration.z / 9.81f
   };
 
-  FusionVector magnetometer1 = { 
-    filtMag1_x,  
+  FusionVector magnetometer1 = {
+    filtMag1_x,
     filtMag1_y,
-    filtMag1_z};
+    filtMag1_z
+  };
 
-  FusionVector magnetometer2 = { 
-    filtMag2_x,  
+  FusionVector magnetometer2 = {
+    filtMag2_x,
     filtMag2_y,
-    filtMag2_z};
+    filtMag2_z
+  };
 
   // Mettre à jour l'AHRS
   FusionAhrsUpdate(&ahrs1, gyroscope1, accelerometer1, magnetometer1, 1.0f / sampleRate);
@@ -171,8 +182,8 @@ void loop() {
   float q2_y = q2.element.y;
   float q2_z = q2.element.z;
   // Convertir q1 et q2 en tableaux de floats
-  float q1Array[4] = {q1_w, q1_x, q1_y, q1_z};
-  float q2Array[4] = {q2_w, q2_x, q2_y, q2_z};
+  float q1Array[4] = { q1_w, q1_x, q1_y, q1_z };
+  float q2Array[4] = { q2_w, q2_x, q2_y, q2_z };
 
   // Maintenant, utilisez q1Array au lieu de q1
   quaternionToEulerDegree(q1Array, roll1, pitch1, yaw1);
@@ -183,74 +194,92 @@ void loop() {
   multiplicationQuaternion(q2Array, q1Inv, qr);
 
   //calcul angle relatif
-  quaternionToEulerDegree(qr,roll,pitch,yaw);
+  quaternionToEulerDegree(qr, roll, pitch, yaw);
 
-  unsigned long currentMillis = millis(); // Récupérer le temps actuel
-  if (currentMillis - previousMillis >= interval) { // Vérifie si 2 secondes se sont écoulées
-    previousMillis = currentMillis; // Met à jour le dernier temps enregistré
-    
+  unsigned long currentMillis = millis();            // Récupérer le temps actuel
+  if (currentMillis - previousMillis >= interval) {  // Vérifie si 2 secondes se sont écoulées
+    previousMillis = currentMillis;                  // Met à jour le dernier temps enregistré
+
     // Afficher les résultats
     Serial.println("Avec librairie:");
     float pitch_diff = euler1.angle.pitch - euler2.angle.pitch;
-    Serial.print("Pitch Capteur 1: "); Serial.print(euler1.angle.pitch);
-    Serial.print(" | Pitch Capteur 2: "); Serial.print(euler2.angle.pitch);
-    Serial.print(" | Différence de Pitch: "); Serial.println(pitch_diff);
+    Serial.print("Pitch Capteur 1: ");
+    Serial.print(euler1.angle.pitch);
+    Serial.print(" | Pitch Capteur 2: ");
+    Serial.print(euler2.angle.pitch);
+    Serial.print(" | Différence de Pitch: ");
+    Serial.println(pitch_diff);
 
     float roll_diff = euler1.angle.roll - euler2.angle.roll;
-    Serial.print("Roll Capteur 1: "); Serial.print(euler1.angle.roll);
-    Serial.print(" | Roll Capteur 2: "); Serial.print(euler2.angle.roll);
-    Serial.print(" | Différence de Roll: "); Serial.println(roll_diff);
+    Serial.print("Roll Capteur 1: ");
+    Serial.print(euler1.angle.roll);
+    Serial.print(" | Roll Capteur 2: ");
+    Serial.print(euler2.angle.roll);
+    Serial.print(" | Différence de Roll: ");
+    Serial.println(roll_diff);
 
     float yaw_diff = euler1.angle.yaw - euler2.angle.yaw;
     if (yaw_diff > 180.0f) yaw_diff -= 360.0f;
     if (yaw_diff < -180.0f) yaw_diff += 360.0f;
-    Serial.print("Yaw Capteur 1: "); Serial.print(euler1.angle.yaw);
-    Serial.print(" | Yaw Capteur 2: "); Serial.print(euler2.angle.yaw);
-    Serial.print(" | Différence de Yaw: "); Serial.println(yaw_diff);
+    Serial.print("Yaw Capteur 1: ");
+    Serial.print(euler1.angle.yaw);
+    Serial.print(" | Yaw Capteur 2: ");
+    Serial.print(euler2.angle.yaw);
+    Serial.print(" | Différence de Yaw: ");
+    Serial.println(yaw_diff);
 
     Serial.println("A la main");
-    Serial.print("Pitch Capteur 1: "); Serial.print(pitch1);
-    Serial.print(" | Pitch Capteur 2: "); Serial.print(pitch2);
-    Serial.print(" | Différence de Pitch: "); Serial.println(pitch);
+    Serial.print("Pitch Capteur 1: ");
+    Serial.print(pitch1);
+    Serial.print(" | Pitch Capteur 2: ");
+    Serial.print(pitch2);
+    Serial.print(" | Différence de Pitch: ");
+    Serial.println(pitch);
 
-    Serial.print("Roll Capteur 1: "); Serial.print(roll1);
-    Serial.print(" | Roll Capteur 2: "); Serial.print(roll2);
-    Serial.print(" | Différence de Roll: "); Serial.println(roll);
+    Serial.print("Roll Capteur 1: ");
+    Serial.print(roll1);
+    Serial.print(" | Roll Capteur 2: ");
+    Serial.print(roll2);
+    Serial.print(" | Différence de Roll: ");
+    Serial.println(roll);
 
-    Serial.print("Yaw Capteur 1: "); Serial.print(yaw1);
-    Serial.print(" | Yaw Capteur 2: "); Serial.print(yaw2);
-    Serial.print(" | Différence de Yaw: "); Serial.println(yaw);
+    Serial.print("Yaw Capteur 1: ");
+    Serial.print(yaw1);
+    Serial.print(" | Yaw Capteur 2: ");
+    Serial.print(yaw2);
+    Serial.print(" | Différence de Yaw: ");
+    Serial.println(yaw);
 
 
     Serial.println("--------------");
 
-  delay(100);
+    delay(100);
   }
 }
 
 
 
-void quaternionToEulerDegree(float q[4], float &roll, float &pitch, float &yaw){
+void quaternionToEulerDegree(float q[4], float &roll, float &pitch, float &yaw) {
   //calcul
-  roll = atan2(2.0*(q[0]*q[1] + q[2]*q[3]) , 1.0 - 2.0*(q[0]*q[0] + q[1]*q[1]));
+  roll = atan2(2.0 * (q[0] * q[1] + q[2] * q[3]), 1.0 - 2.0 * (q[0] * q[0] + q[1] * q[1]));
   pitch = asin(2.0 * (q[0] * q[2] - q[3] * q[1]));
-  yaw = atan2(2.0*(q[0]*q[3] + q[1]*q[2]) , 1.0 - 2.0*(q[2]*q[2] + q[3]*q[3]));
+  yaw = atan2(2.0 * (q[0] * q[3] + q[1] * q[2]), 1.0 - 2.0 * (q[2] * q[2] + q[3] * q[3]));
 
   // Conversion en degrés
-  roll  *= 180.0 / M_PI;
+  roll *= 180.0 / M_PI;
   pitch *= 180.0 / M_PI;
-  yaw   *= 180.0 / M_PI;
+  yaw *= 180.0 / M_PI;
 }
 
-void multiplicationQuaternion(float q1[4], float q2[4], float qm[4]){
-  qm[0] = q1[0]*q2[0] - q1[1]*q2[1] - q1[2]*q2[2] - q1[3]*q2[3];
-  qm[1] = q1[0]*q2[1] + q1[1]*q2[0] + q1[2]*q2[3] - q1[3]*q2[2];
-  qm[2] = q1[0]*q2[2] - q1[1]*q2[3] + q1[2]*q2[0] + q1[3]*q2[1];
-  qm[3] = q1[0]*q2[3] + q1[1]*q2[2] - q1[2]*q2[1] + q1[3]*q2[0];
+void multiplicationQuaternion(float q1[4], float q2[4], float qm[4]) {
+  qm[0] = q1[0] * q2[0] - q1[1] * q2[1] - q1[2] * q2[2] - q1[3] * q2[3];
+  qm[1] = q1[0] * q2[1] + q1[1] * q2[0] + q1[2] * q2[3] - q1[3] * q2[2];
+  qm[2] = q1[0] * q2[2] - q1[1] * q2[3] + q1[2] * q2[0] + q1[3] * q2[1];
+  qm[3] = q1[0] * q2[3] + q1[1] * q2[2] - q1[2] * q2[1] + q1[3] * q2[0];
 }
 
 void quaternionInverse(float q[4], float qInv[4]) {
-  qInv[0] =  q[0];
+  qInv[0] = q[0];
   qInv[1] = -q[1];
   qInv[2] = -q[2];
   qInv[3] = -q[3];
@@ -258,15 +287,15 @@ void quaternionInverse(float q[4], float qInv[4]) {
 
 void calibrateGyro() {
   Serial.println("=== Calibration du Gyroscope ===");
-  
+
   const int numSamples = 500;
-  float sum1[3] = {0, 0, 0};
-  float sum2[3] = {0, 0, 0};
+  float sum1[3] = { 0, 0, 0 };
+  float sum2[3] = { 0, 0, 0 };
 
   for (int i = 0; i < numSamples; i++) {
     sensors_event_t accel1, gyro1, mag1, temp1;
     sensors_event_t accel2, gyro2, mag2, temp2;
-    
+
     icm1.getEvent(&accel1, &gyro1, &temp1, &mag1);
     icm2.getEvent(&accel2, &gyro2, &temp2, &mag2);
 
@@ -291,20 +320,23 @@ void calibrateGyro() {
   Serial.println("Gyroscope calibré !");
 }
 
-void kalman(float newValue, float *state, float *P, float dt){
-  float Q = 0.001;  // Bruit du modèle
-  float R = 0.03;   // Bruit de la mesure 
-  // mise à jour covariance
-  *P += Q * dt;
-  // calcul gain de Kalman
-  float K = *P / (*P + R);
-  //mise à jour val filtré
-  *state += K * (newValue - *state);
-  // mise à jour covariance
-  *P = (1 -K)* *P;
+float Kalman(float U, float *P, float *K, float *U_hat) {
+  //def constantes
+  static float R = 3;   //noise covariance
+  static float H = 1.0;  //measurment map scalar
+  static float Q = 1;   //initial estimated covariance
+
+  //begin
+  *K = (*P) * H / (H * (*P) * H * R);         //update gain
+  *U_hat = *U_hat + *K * (U - H * (*U_hat));  //update estimation
+
+  //update error covariance
+  *P = (1 - *K * H) * (*P) * Q;
+
+  return *U_hat;  //retourne la valeur estimé
 }
 
-void readIMU(){
+void readIMU() {
   icm1.getEvent(&accel1, &gyro1, &temp1, &mag1);
   icm2.getEvent(&accel2, &gyro2, &temp2, &mag2);
 }
@@ -314,7 +346,7 @@ void calibrateMagnetometer() {
   Serial.println("Tournez les IMUs dans toutes les directions pendant 30s...");
 
   unsigned long startTime = millis();
-  const unsigned long calibrationTime = 30000; // 30 secondes
+  const unsigned long calibrationTime = 30000;  // 30 secondes
 
   // Initialisation des min/max pour chaque axe
   for (int i = 0; i < 3; i++) {
@@ -330,8 +362,8 @@ void calibrateMagnetometer() {
     icm1.getEvent(&accel1, &gyro1, &temp1, &mag1);
     icm2.getEvent(&accel2, &gyro2, &temp2, &mag2);
 
-    float mag1_values[3] = {mag1.magnetic.x, mag1.magnetic.y, mag1.magnetic.z};
-    float mag2_values[3] = {mag2.magnetic.x, mag2.magnetic.y, mag2.magnetic.z};
+    float mag1_values[3] = { mag1.magnetic.x, mag1.magnetic.y, mag1.magnetic.z };
+    float mag2_values[3] = { mag2.magnetic.x, mag2.magnetic.y, mag2.magnetic.z };
 
     // Mise à jour des min/max pour les 3 axes
     for (int i = 0; i < 3; i++) {
