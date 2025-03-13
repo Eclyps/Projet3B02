@@ -1,4 +1,4 @@
-from flask import Flask, jsonify
+from flask import Flask, render_template, send_from_directory, jsonify
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import PatternFill
 import pandas as pd
@@ -88,7 +88,7 @@ def write_event(post_id, data_type, value):
 
 init_excel_file()
 
-OUTPUT_FOLDER = "pdf_reports"
+PDF_DIR = 'pdf_reports'
 
 # Lecture des données du fichier excel pour une joueuese
 def read_data_from_excel(post_id):
@@ -149,7 +149,7 @@ def plot_sprint_vs_normal(df, post_id):
     return pie_path
 
 #Génère le pdf
-def generate_pdf_report(post_id):
+def generate_pdf_report(post_id, output_path=None):
     df = read_data_from_excel(post_id)
     if df is None:
         return
@@ -169,7 +169,6 @@ def generate_pdf_report(post_id):
     pdf.set_font("Arial", size=16)
     pdf.cell(200, 10, f"Rapport Joueur ID {post_id}", ln=True, align='C')
 
-
     pdf.set_font("Arial", size=12)
     pdf.ln(10)
     pdf.cell(0, 10, f"Vitesse Max : {vmax} km/h", ln=True)
@@ -185,22 +184,36 @@ def generate_pdf_report(post_id):
     pdf.cell(0, 10, "Proportion Sprint vs Normal :", ln=True)
     pdf.image(sprint_pie, w=120)
 
-    pdf_file = f"rapport_ID_{post_id}.pdf"
-    pdf.output(pdf_file)
-    print(f"PDF généré : {pdf_file}")
+    # Si pas de output_path, on génère le chemin par défaut dans le dossier courant
+    if output_path is None:
+        output_path = f"rapport_ID_{post_id}.pdf"
+
+    pdf.output(output_path)
+    print(f"✅ PDF généré : {output_path}")
 
 # Génère pour toutes les joueuses
 def generate_all_reports():
+    # Création du dossier s'il n'existe pas
+    os.makedirs(PDF_DIR, exist_ok=True)
+
+    # Ouverture du fichier Excel
     wb = load_workbook(EXCEL_FILE)
     sheet_names = wb.sheetnames
 
+    # Boucle sur chaque feuille qui commence par "ID_"
     for sheet_name in sheet_names:
         if sheet_name.startswith("ID_"):
             post_id = sheet_name.replace("ID_", "")
             print(f"➡️ Génération du PDF pour l'ID {post_id}")
-            generate_pdf_report(post_id)
 
-    print("✅ Tous les rapports PDF ont été générés !")
+            # Chemin complet du fichier PDF à générer
+            pdf_filename = f"rapport_ID_{post_id}.pdf"
+            pdf_filepath = os.path.join(PDF_DIR, pdf_filename)
+
+            # Appel de ta fonction de génération avec le chemin
+            generate_pdf_report(post_id, pdf_filepath)
+
+    print("✅ Tous les rapports PDF ont été générés dans le dossier :", PDF_DIR)
 
 
 #SERVER HTTP
@@ -223,21 +236,23 @@ def post_alerte(post_id):
 
 @app.route('/post/vitesse/<int:post_id>/<float:vitesse>', methods=["POST"])
 def post_vitesse(post_id, vitesse):
-    dic_vitesse[post_id] = vitesse
-    write_event(post_id, "Vitesse", vitesse)
-    return f'Vitesse enregistrée {post_id} -> {vitesse}'
+    vit = round(vitesse * 3.6,1) #m/s -> km/h
+    dic_vitesse[post_id] = vit
+    write_event(post_id, "Vitesse", vit)
+    return f'Vitesse enregistrée {post_id} -> {vit}'
 
 @app.route('/post/distance/<int:post_id>/<float:distance>', methods=["POST"])
 def post_distance(post_id, distance):
-    dic_distance[post_id] = distance/1000 #pour mettre en km
-    write_event(post_id, "Distance", distance/1000)
+    dic_distance[post_id] = round(distance/1000,1) #pour mettre en km
+    write_event(post_id, "Distance", round(distance/1000,1))
     return f'Distance enregistrée {post_id} -> {distance}'
 
 @app.route('/post/vitesseMax/<int:post_id>/<float:vitesse>', methods=["POST"])
 def post_vitesse_max(post_id, vitesse):
-    dic_vitesse_max[post_id] = vitesse
-    write_event(post_id, "VitesseMax", vitesse)
-    return f'VitesseMax enregistrée {post_id} -> {vitesse}'
+    vit = round(vitesse * 3.6,1) # m/s -> km/h
+    dic_vitesse_max[post_id] = vit
+    write_event(post_id, "VitesseMax", vit)
+    return f'VitesseMax enregistrée {post_id} -> {vit}'
 
 @app.route('/post/distanceSprint/<int:post_id>/<float:distance>', methods=["POST"])
 def post_distance_sprint(post_id, distance):
@@ -272,10 +287,24 @@ def get_vitesse_max():
 def get_distance_sprint():
     return jsonify(dic_distance_sprint)
 
-@app.route('/export/pdf/all', methods=["GET"])
-def export_all_pdfs():
+@app.route('/download/reports')
+def download_reports():
+    # Générer les fichiers PDF
     generate_all_reports()
-    return "Tous les rapports PDF ont été générés !"
+
+    # Liste des fichiers PDF générés
+    pdf_files = []
+    for filename in os.listdir(PDF_DIR):
+        if filename.endswith(".pdf"):
+            pdf_files.append(filename)
+
+    # page HTML avec les liens de téléchargement
+    return render_template('download_page.html', pdf_files=pdf_files)
+
+@app.route('/download/<filename>')
+def download_file(filename):
+    # Servir le fichier PDF demandé pour le téléchargement
+    return send_from_directory(PDF_DIR, filename, as_attachment=True)
 
 
 if __name__ == "__main__":

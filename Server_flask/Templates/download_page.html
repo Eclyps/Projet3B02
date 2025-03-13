@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Téléchargement des Rapports PDF</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 40px;
+            font-size: 20px;
+        }
+        h1 {
+            color: #333;
+            text-align: center;
+            font-size: 40px;
+
+        }
+        ul {
+            list-style: none;
+            padding: 0;
+        }
+        li {
+            margin-bottom: 40px;
+        }
+        a {
+            text-decoration: none;
+            color: #333;
+            background-color: #FDDBF5;
+            padding: 10px 20px;
+            border-radius: 5px;
+        }
+        a:hover {
+            background-color: #FC5DD0;
+        }
+    </style>
+</head>
+<body>
+
+    <h1>📄 Rapports PDF Générés</h1>
+    <p>➡ Cliquez sur un rapport pour le télécharger :</p>
+
+    <ul>
+        {% for file in pdf_files %}
+        <li>
+            <a href="{{ url_for('download_file', filename=file) }}">{{ file }}</a>
+        </li>
+        {% endfor %}
+    </ul>
+
+</body>
+</html>
