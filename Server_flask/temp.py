@@ -201,9 +201,11 @@ def hello_world():
     return "<p> Hello World!</p>"
 
 
-@app.route('/postMessage/<int:postId>', methods=["POST"])
-def post_message(postId):
-    return f'{postId} connecté'
+@app.route('/postMessage/<int:postId>/<string:messageArduino>', methods=["POST"])
+def post_message(postId, messageArduino):
+    global message
+    message = messageArduino
+    return f'Message reçu : {message}'
 
 
 @app.route('/postInfoCompetition', methods=["POST"])

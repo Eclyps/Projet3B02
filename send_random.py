@@ -3,7 +3,7 @@ import random
 import time
 
 # Adresse de base du serveur
-base_url = "http://10.43.49.254:5000/post"
+base_url = "http://10.221.29.254:5000/post"
 
 # Fonction pour générer les valeurs aléatoires en fonction de l'endpoint
 def generate_random_value(endpoint):
